@@ -57,6 +57,8 @@ let level = 1;
 let gameOver = false;
 let levelTransition = false;  // true while level-complete overlay is showing
 let levelOverlayTimer = 0;    // seconds remaining for transition overlay
+let titleScreen = true;        // true while title screen is showing
+let gameOverTimer = 0;         // countdown before returning to title screen
 // ---------------------------------------------------------------------------
 // Scoring & cycling multiplier (issue #21)
 // ---------------------------------------------------------------------------
@@ -442,6 +444,12 @@ window.addEventListener('keydown', function (e) {
     e.preventDefault();
   }
 
+  // Title screen: any key starts the game
+  if (titleScreen) {
+    titleScreen = false;
+    return;
+  }
+
   // Play-again: R key resets game when game over
   if (gameOver && e.code === 'KeyR') {
     resetGame();
@@ -542,8 +550,12 @@ window.addEventListener('keyup', function (e) {
   }
 });
 
-// Play-again: click canvas when game over
+// Play-again: click canvas when game over; also start from title screen
 canvas.addEventListener('click', function () {
+  if (titleScreen) {
+    titleScreen = false;
+    return;
+  }
   if (gameOver) {
     resetGame();
   }
@@ -625,33 +637,77 @@ function renderHUD() {
   }
 }
 
+
+function renderTitle() {
+  ctx.fillStyle = CGA.BLACK;
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  // Big STYX title
+  ctx.fillStyle = CGA.CYAN;
+  ctx.font = 'bold 96px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('STYX', CANVAS_W / 2, CANVAS_H / 2 - 60);
+
+  // Subtitle
+  ctx.fillStyle = CGA.MAGENTA;
+  ctx.font = 'bold 18px monospace';
+  ctx.fillText('TERRITORY CONQUEST', CANVAS_W / 2, CANVAS_H / 2 - 15);
+
+  // Instructions
+  ctx.fillStyle = CGA.WHITE;
+  ctx.font = 'bold 14px monospace';
+  ctx.fillText('ARROW KEYS to move   SPACE to draw', CANVAS_W / 2, CANVAS_H / 2 + 30);
+  ctx.fillText('Claim 80% to advance   Avoid enemies!', CANVAS_W / 2, CANVAS_H / 2 + 52);
+
+  // Blinking prompt
+  const blink = Math.floor(Date.now() / 500) % 2 === 0;
+  if (blink) {
+    ctx.fillStyle = CGA.CYAN;
+    ctx.font = 'bold 16px monospace';
+    ctx.fillText('PRESS ANY KEY TO START', CANVAS_W / 2, CANVAS_H / 2 + 100);
+  }
+
+  ctx.textAlign = 'left';
+}
 function renderLevelTransition() {
   ctx.fillStyle = 'rgba(0,0,0,0.75)';
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
   ctx.fillStyle = CGA.CYAN;
-  ctx.font = 'bold 48px monospace';
+  ctx.font = 'bold 36px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(`LEVEL ${level}`, CANVAS_W / 2, CANVAS_H / 2 - 20);
+  ctx.fillText(`LEVEL ${level - 1} COMPLETE!`, CANVAS_W / 2, CANVAS_H / 2 - 30);
+  ctx.fillStyle = CGA.MAGENTA;
+  ctx.font = 'bold 48px monospace';
+  ctx.fillText(`LEVEL ${level}`, CANVAS_W / 2, CANVAS_H / 2 + 20);
   ctx.fillStyle = CGA.WHITE;
   ctx.font = 'bold 16px monospace';
-  ctx.fillText('GET READY!', CANVAS_W / 2, CANVAS_H / 2 + 20);
+  ctx.fillText('GET READY!', CANVAS_W / 2, CANVAS_H / 2 + 60);
   ctx.textAlign = 'left';
 }
 
 function renderGameOver() {
-  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
   ctx.fillStyle = CGA.MAGENTA;
-  ctx.font = 'bold 32px monospace';
+  ctx.font = 'bold 48px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('GAME OVER', CANVAS_W / 2, CANVAS_H / 2);
+  ctx.fillText('GAME OVER', CANVAS_W / 2, CANVAS_H / 2 - 40);
+  ctx.fillStyle = CGA.CYAN;
+  ctx.font = 'bold 20px monospace';
+  ctx.fillText(`FINAL SCORE: ${score}`, CANVAS_W / 2, CANVAS_H / 2 + 10);
   ctx.fillStyle = CGA.WHITE;
-  ctx.font = 'bold 16px monospace';
-  ctx.fillText('Press R or click to play again', CANVAS_W / 2, CANVAS_H / 2 + 36);
+  ctx.font = 'bold 13px monospace';
+  const secsLeft = Math.max(0, Math.ceil(3.0 - gameOverTimer));
+  ctx.fillText(`Returning to title in ${secsLeft}s...`, CANVAS_W / 2, CANVAS_H / 2 + 46);
   ctx.textAlign = 'left';
 }
 
 function render() {
+  if (titleScreen) {
+    renderTitle();
+    return;
+  }
+
   // Clear with black background
   ctx.fillStyle = CGA.BLACK;
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
@@ -703,6 +759,25 @@ let lastTime = null;
 function gameLoop(timestamp) {
   const dt = lastTime === null ? 0 : Math.min((timestamp - lastTime) / 1000, 0.1);
   lastTime = timestamp;
+
+  if (titleScreen) {
+    render();
+    requestAnimationFrame(gameLoop);
+    return;
+  }
+
+  if (gameOver) {
+    // Auto-return to title after 3 seconds
+    gameOverTimer += dt;
+    if (gameOverTimer >= 3.0) {
+      resetGame();
+      // resetGame sets titleScreen=true; fall through to normal render
+    } else {
+      render();
+      requestAnimationFrame(gameLoop);
+      return;
+    }
+  }
 
   if (!gameOver) {
     // Handle level transition timer
