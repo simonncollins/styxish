@@ -57,6 +57,26 @@ let level = 1;
 let gameOver = false;
 let levelTransition = false;  // true while level-complete overlay is showing
 let levelOverlayTimer = 0;    // seconds remaining for transition overlay
+// ---------------------------------------------------------------------------
+// Scoring & cycling multiplier (issue #21)
+// ---------------------------------------------------------------------------
+
+/** Base score awarded per percentage-point of territory claimed */
+const SCORE_BASE = 100;
+
+/** Multiplier cycle sequence (1x -> 5x -> 10x -> 1x ...) */
+const MULTIPLIER_VALUES = [1, 5, 10];
+
+/** Display colours for each multiplier index */
+const MULTIPLIER_COLORS = [CGA.WHITE, CGA.CYAN, CGA.MAGENTA];
+
+/** Seconds per multiplier step */
+const MULTIPLIER_CYCLE_SECONDS = 2.0;
+
+let score = 0;
+let multiplierIndex = 0;
+let multiplierTimer = 0;
+
 
 /**
  * Invulnerability timer (seconds remaining after a death).
@@ -224,6 +244,8 @@ function triggerDeath() {
   drawMode = false;
   playerMovedThisFrame = false;
   resetFuse();
+  multiplierIndex = 0;
+  multiplierTimer = 0;
 
   if (lives <= 0) {
     gameOver = true;
@@ -351,6 +373,11 @@ function floodFillClaim(borderLine, enemyPosition = null) {
   // 5. Claim the chosen region
   regionToFill.forEach(k => claimedCells.add(k));
 
+  // Award score: claimedArea% x baseScore x multiplier
+  const claimedPct = (claimedCells.size / TOTAL_PLAYFIELD_CELLS) * 100;
+  const mult = MULTIPLIER_VALUES[multiplierIndex];
+  score += Math.round(claimedPct * SCORE_BASE * mult);
+
   checkLevelComplete();
 }
 
@@ -374,6 +401,8 @@ function startNextLevel() {
   player.x = FIELD_LEFT;
   player.y = FIELD_TOP;
   resetFuse();
+  multiplierIndex = 0;
+  multiplierTimer = 0;
   initStyxEnemies(level, claimedCells);
   initWormEnemies(level, claimedCells);
   levelTransition = false;
@@ -571,6 +600,19 @@ function renderHUD() {
   ctx.font = 'bold 13px monospace';
   ctx.fillText(`Territory: ${percentage}%`, FIELD_LEFT + 4, FIELD_TOP - 2);
   ctx.fillText(`Level: ${level}`, FIELD_LEFT + 160, FIELD_TOP - 2);
+  ctx.fillText(`Score: ${score}`, FIELD_LEFT + 260, FIELD_TOP - 2);
+
+  // Cycling multiplier block -- left of the lives icons
+  const multVal   = MULTIPLIER_VALUES[multiplierIndex];
+  const multColor = MULTIPLIER_COLORS[multiplierIndex];
+  const blockSize = CELL + 2;
+  const multX = FIELD_RIGHT - (lives * (CELL + 2)) - blockSize - 16;
+  const multY = BORDER_INSET - blockSize;
+  ctx.fillStyle = multColor;
+  ctx.fillRect(multX, multY, blockSize, blockSize);
+  ctx.fillStyle = CGA.BLACK;
+  ctx.font = 'bold 9px monospace';
+  ctx.fillText(`${multVal}x`, multX + 1, multY + 9);
 
   // Lives as MAGENTA block icons in the top-right
   const iconSize = CELL;
@@ -673,6 +715,12 @@ function gameLoop(timestamp) {
       // Tick down invulnerability timer
       if (invulnTimer > 0) {
         invulnTimer = Math.max(0, invulnTimer - dt);
+      }
+      // Advance cycling multiplier
+      multiplierTimer += dt;
+      if (multiplierTimer >= MULTIPLIER_CYCLE_SECONDS) {
+        multiplierTimer -= MULTIPLIER_CYCLE_SECONDS;
+        multiplierIndex = (multiplierIndex + 1) % MULTIPLIER_VALUES.length;
       }
 
       updateFuse(dt, drawMode, playerMovedThisFrame, currentLine, player, triggerDeath);
