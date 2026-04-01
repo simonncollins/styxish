@@ -1,11 +1,15 @@
 /**
- * enemies.js — Styx enemy AI
+ * enemies.js — Styx enemy AI & Fuse hesitation penalty
  *
  * Exports:
  *   styxEnemies      — array of active Styx enemy objects
  *   initStyxEnemies  — called on game start / level reset
  *   updateStyxEnemies(dt, claimedCells, currentLine, player, onDeath)
  *   renderStyxEnemies(ctx)
+ *   fuse                  — fuse state object
+ *   resetFuse()
+ *   updateFuse(dt, drawMode, playerMoved, stixLine, player, onDeath)
+ *   renderFuse(ctx, stixLine, player)
  */
 
 /* ---- Constants (must match engine.js) ------------------------------------ */
@@ -218,4 +222,132 @@ function renderStyxEnemies(ctx) {
 
     ctx.restore();
   }
+}
+
+
+/* ---- Constants ---------------------------------------------------------- */
+const FUSE_HESITATION_DELAY = 0.5;   // seconds before fuse ignites after player stops
+const FUSE_SPEED            = 64;    // pixels per second along the stix line
+const FUSE_FLICKER_INTERVAL = 0.05;  // seconds between color flicker alternations
+
+const FUSE_COLOR_A = '#FFFFFF';  // CGA white
+const FUSE_COLOR_B = '#00FFFF';  // CGA cyan
+
+/* ---- Fuse state ---------------------------------------------------------- */
+const fuse = {
+  active:       false,    // is the fuse currently visible/advancing?
+  position:     0,        // current position as a float index into stixLine[]
+  hesitTimer:   0,        // time the player has been stationary in draw mode
+  flickerTimer: 0,        // time accumulator for color alternation
+  flickerOn:    true,     // which flicker color to show
+  paused:       false,    // true when player is moving (fuse pauses)
+};
+
+/* ---- Public API ---------------------------------------------------------- */
+
+/** Extinguish the fuse (line completed, draw mode exited, or player died). */
+function resetFuse() {
+  fuse.active      = false;
+  fuse.position    = 0;
+  fuse.hesitTimer  = 0;
+  fuse.flickerTimer = 0;
+  fuse.flickerOn   = true;
+  fuse.paused      = false;
+}
+
+/**
+ * Update the fuse state each frame.
+ *
+ * @param {number} dt              - Delta time in seconds
+ * @param {boolean} drawMode       - Whether the player is currently in draw mode
+ * @param {boolean} playerMoved    - Whether the player moved this frame
+ * @param {Array<{x,y}>} stixLine  - The current in-progress draw line
+ * @param {{x,y}} player           - Current player position
+ * @param {function} onDeath       - Callback when fuse reaches the player
+ */
+function updateFuse(dt, drawMode, playerMoved, stixLine, player, onDeath) {
+  // Fuse is only relevant in draw mode with a line in progress
+  if (!drawMode || stixLine.length === 0) {
+    resetFuse();
+    return;
+  }
+
+  // Build the full path: stixLine + player's current position as endpoint
+  // stixLine[0] is the start (on border), stixLine[last] leads to player
+  const fullPath = [...stixLine, { x: player.x, y: player.y }];
+  const pathLen  = fullPath.length; // number of points
+
+  // Track hesitation
+  if (playerMoved) {
+    // Player is moving — pause the fuse, reset hesitation clock
+    fuse.hesitTimer = 0;
+    fuse.paused     = true;
+  } else {
+    // Player is stationary
+    fuse.paused = false;
+    fuse.hesitTimer += dt;
+
+    if (!fuse.active && fuse.hesitTimer >= FUSE_HESITATION_DELAY) {
+      // Ignite! Fuse starts at position 0 (beginning of stixLine)
+      fuse.active   = true;
+      fuse.position = 0;
+    }
+  }
+
+  if (!fuse.active) return;
+  if (fuse.paused) return;
+
+  // Advance fuse along the path
+  // Convert pixel speed to index advance: each step is CELL=8px apart,
+  // but we track by point index so advance = FUSE_SPEED/8 indices per second
+  const CELL_SIZE = 8;
+  fuse.position += (FUSE_SPEED / CELL_SIZE) * dt;
+
+  // Clamp to path end
+  if (fuse.position >= pathLen - 1) {
+    fuse.position = pathLen - 1;
+    // Reached the player
+    onDeath();
+    resetFuse();
+    return;
+  }
+
+  // Flicker update
+  fuse.flickerTimer += dt;
+  if (fuse.flickerTimer >= FUSE_FLICKER_INTERVAL) {
+    fuse.flickerTimer = 0;
+    fuse.flickerOn    = !fuse.flickerOn;
+  }
+}
+
+/**
+ * Render the fuse as a flickering pixel on the stix line.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Array<{x,y}>} stixLine
+ * @param {{x,y}} player
+ */
+function renderFuse(ctx, stixLine, player) {
+  if (!fuse.active || stixLine.length === 0) return;
+
+  const fullPath = [...stixLine, { x: player.x, y: player.y }];
+  const idx      = Math.floor(fuse.position);
+  const point    = fullPath[Math.min(idx, fullPath.length - 1)];
+
+  const CELL_SIZE = 8;
+  const color = fuse.flickerOn ? FUSE_COLOR_A : FUSE_COLOR_B;
+
+  // Draw the fuse as a bright 2×2 pixel cluster
+  ctx.fillStyle = color;
+  ctx.fillRect(point.x + CELL_SIZE / 2 - 1, point.y + CELL_SIZE / 2 - 1, 3, 3);
+
+  // Draw a faint trail behind the fuse (last 3 path points)
+  for (let i = 1; i <= 3; i++) {
+    const trailIdx = Math.max(0, idx - i);
+    const tp = fullPath[trailIdx];
+    ctx.globalAlpha = 0.4 - i * 0.1;
+    ctx.fillStyle   = color;
+    ctx.fillRect(tp.x + CELL_SIZE / 2 - 1, tp.y + CELL_SIZE / 2 - 1, 2, 2);
+  }
+  ctx.globalAlpha = 1.0;
 }
