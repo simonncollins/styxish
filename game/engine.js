@@ -715,12 +715,12 @@ function gameLoop(timestamp) {
       // Tick down invulnerability timer
       if (invulnTimer > 0) {
         invulnTimer = Math.max(0, invulnTimer - dt);
+      }
       // Advance cycling multiplier
       multiplierTimer += dt;
       if (multiplierTimer >= MULTIPLIER_CYCLE_SECONDS) {
         multiplierTimer -= MULTIPLIER_CYCLE_SECONDS;
         multiplierIndex = (multiplierIndex + 1) % MULTIPLIER_VALUES.length;
-      }
       }
 
       updateFuse(dt, drawMode, playerMovedThisFrame, currentLine, player, triggerDeath);
