@@ -19,7 +19,8 @@ const ENEMY_FIELD_TOP    = 8;
 const ENEMY_FIELD_RIGHT  = 800 - 8;   // CANVAS_W - BORDER_INSET
 const ENEMY_FIELD_BOTTOM = 580 - 8;   // CANVAS_H - BORDER_INSET
 
-const STYX_SPEED = 48;   // pixels per second
+const STYX_SPEED = 48;   // pixels per second (base speed at level 1)
+const STYX_SPEED_SCALE = 1.15; // speed multiplier per level
 const STYX_COLORS = ['#00FFFF', '#FF00FF', '#FFFFFF'];   // CGA cycle
 
 /* ---- Helpers ------------------------------------------------------------- */
@@ -114,7 +115,7 @@ const styxEnemies = [];
 
 function initStyxEnemies(level, claimedCells) {
   styxEnemies.length = 0;
-  const count = Math.min(1 + (level - 1), 3);
+  const count = level >= 3 ? Math.min(level - 1, 3) : 1;
   for (let i = 0; i < count; i++) {
     styxEnemies.push(createStyx(claimedCells));
   }
@@ -166,7 +167,7 @@ function moveStyxOneCell(styx, claimedCells) {
  * @param {{x,y}} player         - Player position
  * @param {function} onDeath     - Callback: called when Styx hits in-progress line
  */
-function updateStyxEnemies(dt, claimedCells, currentLine, player, onDeath) {
+function updateStyxEnemies(dt, claimedCells, currentLine, player, onDeath, level = 1) {
   for (const styx of styxEnemies) {
     // Advance animation angle
     styx.angle += dt * 3.5;
@@ -179,7 +180,8 @@ function updateStyxEnemies(dt, claimedCells, currentLine, player, onDeath) {
     }
 
     // Movement (cell-based with sub-pixel accumulation for smooth pacing)
-    styx.acc += STYX_SPEED * dt;
+    const styxSpeed = STYX_SPEED * Math.pow(STYX_SPEED_SCALE, level - 1);
+    styx.acc += styxSpeed * dt;
     while (styx.acc >= ENEMY_CELL) {
       styx.acc -= ENEMY_CELL;
       moveStyxOneCell(styx, claimedCells);
@@ -363,7 +365,7 @@ let _cachedPerimeter = [];
 function initWormEnemies(level, claimedCells) {
   wormEnemies.length = 0;
   _cachedPerimeter = buildCleanPerimeter(claimedCells);
-  const count = Math.min(1 + (level - 1), 3);
+  const count = Math.min(level, 3);
   for (let i = 0; i < count; i++) {
     const offset = Math.floor((_cachedPerimeter.length / count) * i);
     wormEnemies.push(createWorm(_cachedPerimeter, offset));

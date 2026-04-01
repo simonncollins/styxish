@@ -55,6 +55,8 @@ const TOTAL_PLAYFIELD_CELLS = (FIELD_W_CELLS - 2) * (FIELD_H_CELLS - 2);
 let lives = 3;
 let level = 1;
 let gameOver = false;
+let levelTransition = false;  // true while level-complete overlay is showing
+let levelOverlayTimer = 0;    // seconds remaining for transition overlay
 
 /**
  * Invulnerability timer (seconds remaining after a death).
@@ -248,6 +250,8 @@ function resetGame() {
   level = 1;
   gameOver = false;
   invulnTimer = 0;
+  levelTransition = false;
+  levelOverlayTimer = 0;
   currentLine = [];
   drawMode = false;
   playerMovedThisFrame = false;
@@ -351,9 +355,35 @@ function floodFillClaim(borderLine, enemyPosition = null) {
 }
 
 // ---------------------------------------------------------------------------
+// Start next level: reset territory to border-only and respawn enemies
+// ---------------------------------------------------------------------------
+function startNextLevel() {
+  // Reset claimed territory: keep only the outer border cells
+  claimedCells.clear();
+  for (let cx = 0; cx < FIELD_W_CELLS; cx++) {
+    claimedCells.add(`${cx},0`);
+    claimedCells.add(`${cx},${FIELD_H_CELLS - 1}`);
+  }
+  for (let cy = 1; cy < FIELD_H_CELLS - 1; cy++) {
+    claimedCells.add(`0,${cy}`);
+    claimedCells.add(`${FIELD_W_CELLS - 1},${cy}`);
+  }
+  currentLine = [];
+  drawMode = false;
+  playerMovedThisFrame = false;
+  player.x = FIELD_LEFT;
+  player.y = FIELD_TOP;
+  resetFuse();
+  initStyxEnemies(level, claimedCells);
+  initWormEnemies(level, claimedCells);
+  levelTransition = false;
+}
+
+// ---------------------------------------------------------------------------
 // Check and dispatch level-complete event
 // ---------------------------------------------------------------------------
 function checkLevelComplete() {
+  if (levelTransition) return;  // already transitioning — don't fire again
   const percentage = (claimedCells.size / TOTAL_PLAYFIELD_CELLS) * 100;
   if (percentage >= 80) {
     window.dispatchEvent(new CustomEvent('level-complete', {
@@ -361,6 +391,16 @@ function checkLevelComplete() {
     }));
   }
 }
+
+// ---------------------------------------------------------------------------
+// Level-complete event listener
+// ---------------------------------------------------------------------------
+window.addEventListener('level-complete', function () {
+  level += 1;
+  levelTransition = true;
+  levelOverlayTimer = 1.5;
+});
+
 
 // ---------------------------------------------------------------------------
 // Input handling
@@ -543,6 +583,19 @@ function renderHUD() {
   }
 }
 
+function renderLevelTransition() {
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  ctx.fillStyle = CGA.CYAN;
+  ctx.font = 'bold 48px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(`LEVEL ${level}`, CANVAS_W / 2, CANVAS_H / 2 - 20);
+  ctx.fillStyle = CGA.WHITE;
+  ctx.font = 'bold 16px monospace';
+  ctx.fillText('GET READY!', CANVAS_W / 2, CANVAS_H / 2 + 20);
+  ctx.textAlign = 'left';
+}
+
 function renderGameOver() {
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
@@ -592,6 +645,9 @@ function render() {
   // HUD overlay
   renderHUD();
 
+  if (levelTransition) {
+    renderLevelTransition();
+  }
   if (gameOver) {
     renderGameOver();
   }
@@ -607,14 +663,22 @@ function gameLoop(timestamp) {
   lastTime = timestamp;
 
   if (!gameOver) {
-    // Tick down invulnerability timer
-    if (invulnTimer > 0) {
-      invulnTimer = Math.max(0, invulnTimer - dt);
-    }
+    // Handle level transition timer
+    if (levelTransition) {
+      levelOverlayTimer = Math.max(0, levelOverlayTimer - dt);
+      if (levelOverlayTimer <= 0) {
+        startNextLevel();
+      }
+    } else {
+      // Tick down invulnerability timer
+      if (invulnTimer > 0) {
+        invulnTimer = Math.max(0, invulnTimer - dt);
+      }
 
-    updateFuse(dt, drawMode, playerMovedThisFrame, currentLine, player, triggerDeath);
-    updateStyxEnemies(dt, claimedCells, currentLine, player, triggerDeath);
-    updateWormEnemies(dt, claimedCells, player, triggerDeath, level);
+      updateFuse(dt, drawMode, playerMovedThisFrame, currentLine, player, triggerDeath);
+      updateStyxEnemies(dt, claimedCells, currentLine, player, triggerDeath, level);
+      updateWormEnemies(dt, claimedCells, player, triggerDeath, level);
+    }
   }
 
   // Reset per-frame movement flag after fuse has read it
