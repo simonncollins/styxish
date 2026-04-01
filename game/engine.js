@@ -1,7 +1,7 @@
 /**
  * engine.js — Styx core game engine
  * Canvas setup, 60fps game loop, CGA palette constants,
- * player marker & 8-directional movement (issue #3).
+ * player movement (issue #3), draw mode & Stix line rendering (issue #4).
  */
 
 // CGA palette constants — all colour references must use these
@@ -50,6 +50,17 @@ const player = {
 /** Keys currently held (by e.code) */
 const keysHeld = new Set();
 
+/**
+ * Current in-progress Stix draw line.
+ * Array of {x, y} pixel positions tracing the path the player has drawn.
+ * Populated while SPACEBAR is held and player moves.
+ * Cleared when line completes (connects back to border) or SPACEBAR released.
+ */
+let currentLine = [];
+
+/** True when SPACEBAR is held and player is in draw mode. */
+let drawMode = false;
+
 // ---------------------------------------------------------------------------
 // Helper: snap a pixel value to the nearest CELL grid position
 // ---------------------------------------------------------------------------
@@ -69,7 +80,6 @@ function clampToField(px, py) {
 
 // ---------------------------------------------------------------------------
 // Helper: is (px, py) on the outer border perimeter?
-// Returns true when the position lies on the rectangular border edge.
 // ---------------------------------------------------------------------------
 function isOnOuterBorder(px, py) {
   const x = snapToGrid(px);
@@ -86,10 +96,21 @@ function isOnOuterBorder(px, py) {
 
 // ---------------------------------------------------------------------------
 // Helper: is (px, py) on a valid position for normal (non-draw) movement?
-// In issue #3 this is only the outer border; claimed-edge support is added in #5.
+// Extended in issue #5 to include claimed territory edges.
 // ---------------------------------------------------------------------------
 function isOnSafeEdge(px, py) {
   return isOnOuterBorder(px, py);
+}
+
+// ---------------------------------------------------------------------------
+// Stub: flood-fill claim — implemented in issue #5.
+// Called when the draw line connects back to a safe edge.
+//
+// @param {Array<{x:number, y:number}>} borderLine - Completed Stix line cells
+// @param {{x:number, y:number}|null} enemyPosition - See issue #5 for details
+// ---------------------------------------------------------------------------
+function floodFillClaim(borderLine, enemyPosition = null) { // eslint-disable-line no-unused-vars
+  // TODO: implement in issue #5 (flood-fill territory claiming)
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +124,15 @@ window.addEventListener('keydown', function (e) {
     e.preventDefault();
   }
 
-  // Movement — only process arrow keys
+  // SPACEBAR toggles draw mode on
+  if (e.code === 'Space') {
+    if (!drawMode) {
+      drawMode = true;
+    }
+    return;
+  }
+
+  // Only process arrow keys for movement
   const isArrow = ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code);
   if (!isArrow) return;
 
@@ -117,20 +146,88 @@ window.addEventListener('keydown', function (e) {
 
   const newPos = clampToField(player.x + dx, player.y + dy);
 
-  // Normal mode: only allow movement along valid edges
-  if (isOnSafeEdge(newPos.x, newPos.y)) {
-    player.x = newPos.x;
-    player.y = newPos.y;
+  if (drawMode) {
+    // Draw mode: player can move into unclaimed interior space
+
+    // Cannot retrace or cross own current draw line
+    const onCurrentLine = currentLine.some(p => p.x === newPos.x && p.y === newPos.y);
+    if (onCurrentLine) return;
+
+    // Check if moving back onto a safe edge while we have a line in progress
+    if (currentLine.length > 0 && isOnSafeEdge(newPos.x, newPos.y)) {
+      // Line complete — add terminal point, trigger flood-fill, reset draw state
+      currentLine.push({ x: newPos.x, y: newPos.y });
+      player.x = newPos.x;
+      player.y = newPos.y;
+      const completedLine = currentLine.slice();
+      currentLine = [];
+      drawMode = false;
+      floodFillClaim(completedLine, null);
+    } else {
+      // Extend the line: record current player position before moving
+      currentLine.push({ x: player.x, y: player.y });
+      player.x = newPos.x;
+      player.y = newPos.y;
+    }
+  } else {
+    // Normal mode: only allow movement along safe edges
+    if (isOnSafeEdge(newPos.x, newPos.y)) {
+      player.x = newPos.x;
+      player.y = newPos.y;
+    }
   }
 });
 
 window.addEventListener('keyup', function (e) {
   keysHeld.delete(e.code);
+
+  if (e.code === 'Space') {
+    if (drawMode) {
+      if (currentLine.length > 0) {
+        // SPACEBAR released mid-draw: erase unfinished line, return player to border
+        currentLine = [];
+        // Snap player to nearest border edge
+        const px = snapToGrid(player.x);
+        const py = snapToGrid(player.y);
+
+        // Project to nearest border side
+        const distLeft   = px - FIELD_LEFT;
+        const distRight  = (FIELD_RIGHT - CELL) - px;
+        const distTop    = py - FIELD_TOP;
+        const distBottom = (FIELD_BOTTOM - CELL) - py;
+        const minDist = Math.min(distLeft, distRight, distTop, distBottom);
+
+        let bx = px;
+        let by = py;
+        if (minDist === distLeft)   bx = FIELD_LEFT;
+        else if (minDist === distRight)  bx = FIELD_RIGHT - CELL;
+        else if (minDist === distTop)    by = FIELD_TOP;
+        else                              by = FIELD_BOTTOM - CELL;
+
+        // Clamp to valid range after projection
+        const clamped = clampToField(bx, by);
+        player.x = clamped.x;
+        player.y = clamped.y;
+      }
+      drawMode = false;
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
+
+/**
+ * Draw the in-progress Stix line as white filled squares (one per cell).
+ */
+function renderCurrentLine() {
+  if (currentLine.length === 0) return;
+  ctx.fillStyle = CGA.WHITE;
+  for (const { x, y } of currentLine) {
+    ctx.fillRect(x, y, CELL, CELL);
+  }
+}
 
 /**
  * Draw the player marker — magenta 8×8 square.
@@ -154,6 +251,9 @@ function render() {
     CANVAS_W - BORDER_INSET * 2,
     CANVAS_H - BORDER_INSET * 2
   );
+
+  // In-progress draw line (drawn before player so player is on top)
+  renderCurrentLine();
 
   // Player
   renderPlayer();
