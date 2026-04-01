@@ -4,7 +4,8 @@
  * player movement (issue #3), draw mode & Stix line rendering (issue #4),
  * flood-fill territory claiming & HUD (issue #5),
  * Styx field enemy (issue #11),
- * Worm border patrol enemy (issue #12).
+ * Worm border patrol enemy (issue #12),
+ * Fuse hesitation penalty (issue #13).
  */
 
 // CGA palette constants — all colour references must use these
@@ -79,6 +80,9 @@ let currentLine = [];
 
 /** True when SPACEBAR is held and player is in draw mode. */
 let drawMode = false;
+
+/** Whether the player moved this frame (used by fuse logic). */
+let playerMovedThisFrame = false;
 
 /**
  * Claimed territory cells.
@@ -173,6 +177,8 @@ function triggerDeath() {
   lives -= 1;
   currentLine = [];
   drawMode = false;
+  playerMovedThisFrame = false;
+  resetFuse();
   player.x = FIELD_LEFT;
   player.y = FIELD_TOP;
   if (lives <= 0) {
@@ -343,12 +349,14 @@ window.addEventListener('keydown', function (e) {
       currentLine.push({ x: player.x, y: player.y });
       player.x = newPos.x;
       player.y = newPos.y;
+      playerMovedThisFrame = true;
     }
   } else {
     // Normal mode: only allow movement along safe edges
     if (isOnSafeEdge(newPos.x, newPos.y)) {
       player.x = newPos.x;
       player.y = newPos.y;
+      playerMovedThisFrame = true;
     }
   }
 });
@@ -469,6 +477,9 @@ function render() {
   // In-progress draw line (beneath player)
   renderCurrentLine();
 
+  // Fuse (on top of line, below player)
+  renderFuse(ctx, currentLine, player);
+
   // Styx enemies
   renderStyxEnemies(ctx);
 
@@ -496,9 +507,13 @@ function gameLoop(timestamp) {
   lastTime = timestamp;
 
   if (!gameOver) {
+    updateFuse(dt, drawMode, playerMovedThisFrame, currentLine, player, triggerDeath);
     updateStyxEnemies(dt, claimedCells, currentLine, player, triggerDeath);
     updateWormEnemies(dt, claimedCells, player, triggerDeath, level);
   }
+
+  // Reset per-frame movement flag after fuse has read it
+  playerMovedThisFrame = false;
 
   render();
   requestAnimationFrame(gameLoop);
