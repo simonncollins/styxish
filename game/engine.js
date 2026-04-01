@@ -2,7 +2,8 @@
  * engine.js — Styx core game engine
  * Canvas setup, 60fps game loop, CGA palette constants,
  * player movement (issue #3), draw mode & Stix line rendering (issue #4),
- * flood-fill territory claiming & HUD (issue #5).
+ * flood-fill territory claiming & HUD (issue #5),
+ * Styx field enemy (issue #11).
  */
 
 // CGA palette constants — all colour references must use these
@@ -43,6 +44,14 @@ const FIELD_H_CELLS = (FIELD_BOTTOM - FIELD_TOP) / CELL;
  * Subtract 2 on each axis to exclude the 1-cell-wide border row/column.
  */
 const TOTAL_PLAYFIELD_CELLS = (FIELD_W_CELLS - 2) * (FIELD_H_CELLS - 2);
+
+// ---------------------------------------------------------------------------
+// Game state
+// ---------------------------------------------------------------------------
+
+let lives = 3;
+let level = 1;
+let gameOver = false;
 
 // ---------------------------------------------------------------------------
 // Player state
@@ -153,27 +162,26 @@ function isOnSafeEdge(px, py) {
 }
 
 // ---------------------------------------------------------------------------
+// Death & reset
+// ---------------------------------------------------------------------------
+
+/**
+ * Handle player death: lose a life, reset draw state, snap player to border.
+ */
+function triggerDeath() {
+  lives -= 1;
+  currentLine = [];
+  drawMode = false;
+  player.x = FIELD_LEFT;
+  player.y = FIELD_TOP;
+  if (lives <= 0) {
+    gameOver = true;
+    window.dispatchEvent(new CustomEvent('game-over'));
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Flood-fill territory claiming
-//
-// @param {Array<{x:number, y:number}>} borderLine
-//   The newly completed Stix border line (pixel positions of drawn cells).
-//   These cells form the new border between claimed and unclaimed territory.
-//
-// @param {{x:number, y:number}|null} enemyPosition
-//   Optional enemy position in pixel coordinates.
-//
-//   PHASE 1 (no enemies): pass null — the function fills the SMALLER of the
-//   two regions enclosed by the new border line + existing claimed territory.
-//   Smaller-region fill is the authentic Styx mechanic (maximises risk/reward).
-//
-//   PHASE 2 (enemies): pass the enemy's current {x, y}.
-//   The function fills the region that does NOT contain the enemy, ensuring
-//   the enemy is never trapped in claimed territory. If the enemy is on a
-//   barrier cell (already claimed), all enclosed regions are safe to fill.
-//   If multiple safe regions exist, the largest is chosen to reward the player.
-//
-//   Example Phase 2 call:
-//     floodFillClaim(completedLine, { x: enemy.x, y: enemy.y });
 // ---------------------------------------------------------------------------
 function floodFillClaim(borderLine, enemyPosition = null) {
   // 1. Add borderLine pixels to claimedCells (they become the new wall)
@@ -182,7 +190,6 @@ function floodFillClaim(borderLine, enemyPosition = null) {
   });
 
   // 2. Build barrier set: outer border rows/cols + all claimed cells
-  //    Barrier = cannot be filled; flood-fill stays inside barriers.
   const barriers = new Set(claimedCells);
   for (let cx = 0; cx < FIELD_W_CELLS; cx++) {
     barriers.add(`${cx},0`);
@@ -287,6 +294,8 @@ window.addEventListener('keydown', function (e) {
     e.preventDefault();
   }
 
+  if (gameOver) return;
+
   // SPACEBAR activates draw mode
   if (e.code === 'Space') {
     if (!drawMode) {
@@ -325,7 +334,9 @@ window.addEventListener('keydown', function (e) {
       const completedLine = currentLine.slice();
       currentLine = [];
       drawMode = false;
-      floodFillClaim(completedLine, null);
+      // Pass Styx position so fill avoids trapping enemies
+      const enemyPos = styxEnemies.length > 0 ? { x: styxEnemies[0].x, y: styxEnemies[0].y } : null;
+      floodFillClaim(completedLine, enemyPos);
     } else {
       // Extend the line: record current position before moving
       currentLine.push({ x: player.x, y: player.y });
@@ -412,13 +423,28 @@ function renderPlayer() {
 }
 
 /**
- * Draw the territory percentage HUD (white monospace text, top of canvas).
+ * Draw the territory percentage and lives HUD.
  */
 function renderHUD() {
   const percentage = ((claimedCells.size / TOTAL_PLAYFIELD_CELLS) * 100).toFixed(1);
   ctx.fillStyle = CGA.WHITE;
   ctx.font = 'bold 13px monospace';
   ctx.fillText(`Territory: ${percentage}%`, FIELD_LEFT + 4, FIELD_TOP - 2);
+  ctx.fillText(`Lives: ${lives}`, FIELD_RIGHT - 80, FIELD_TOP - 2);
+  ctx.fillText(`Level: ${level}`, FIELD_LEFT + 160, FIELD_TOP - 2);
+}
+
+function renderGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  ctx.fillStyle = CGA.MAGENTA;
+  ctx.font = 'bold 32px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('GAME OVER', CANVAS_W / 2, CANVAS_H / 2);
+  ctx.fillStyle = CGA.WHITE;
+  ctx.font = 'bold 16px monospace';
+  ctx.fillText('Refresh to play again', CANVAS_W / 2, CANVAS_H / 2 + 36);
+  ctx.textAlign = 'left';
 }
 
 function render() {
@@ -442,22 +468,39 @@ function render() {
   // In-progress draw line (beneath player)
   renderCurrentLine();
 
+  // Styx enemies
+  renderStyxEnemies(ctx);
+
   // Player (on top)
   renderPlayer();
 
   // HUD overlay
   renderHUD();
+
+  if (gameOver) {
+    renderGameOver();
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Game loop
 // ---------------------------------------------------------------------------
-function gameLoop() {
+let lastTime = null;
+
+function gameLoop(timestamp) {
+  const dt = lastTime === null ? 0 : Math.min((timestamp - lastTime) / 1000, 0.1);
+  lastTime = timestamp;
+
+  if (!gameOver) {
+    updateStyxEnemies(dt, claimedCells, currentLine, player, triggerDeath);
+  }
+
   render();
   requestAnimationFrame(gameLoop);
 }
 
 // Kick off the loop once the page is ready
 window.addEventListener('load', function () {
+  initStyxEnemies(level, claimedCells);
   requestAnimationFrame(gameLoop);
 });
