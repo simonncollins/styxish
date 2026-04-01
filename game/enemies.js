@@ -506,6 +506,7 @@ function updateFuse(dt, drawMode, playerMoved, stixLine, player, onDeath) {
       // Ignite! Fuse starts at position 0 (beginning of stixLine)
       fuse.active   = true;
       fuse.position = 0;
+      if (typeof sfxFuseIgnition === 'function') sfxFuseIgnition();
     }
   }
 

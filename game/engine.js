@@ -246,6 +246,7 @@ function triggerDeath() {
   resetFuse();
   multiplierIndex = 0;
   multiplierTimer = 0;
+  if (typeof sfxDeath === 'function') sfxDeath();
 
   if (lives <= 0) {
     gameOver = true;
@@ -372,6 +373,7 @@ function floodFillClaim(borderLine, enemyPosition = null) {
 
   // 5. Claim the chosen region
   regionToFill.forEach(k => claimedCells.add(k));
+  if (typeof sfxTerritoryClaim === 'function') sfxTerritoryClaim();
 
   // Award score: claimedArea% x baseScore x multiplier
   const claimedPct = (claimedCells.size / TOTAL_PLAYFIELD_CELLS) * 100;
@@ -415,6 +417,7 @@ function checkLevelComplete() {
   if (levelTransition) return;  // already transitioning — don't fire again
   const percentage = (claimedCells.size / TOTAL_PLAYFIELD_CELLS) * 100;
   if (percentage >= 80) {
+    if (typeof sfxLevelComplete === 'function') sfxLevelComplete();
     window.dispatchEvent(new CustomEvent('level-complete', {
       detail: { percentage: percentage.toFixed(1) },
     }));
@@ -454,6 +457,7 @@ window.addEventListener('keydown', function (e) {
   if (e.code === 'Space') {
     if (!drawMode) {
       drawMode = true;
+      if (typeof sfxDrawStart === 'function') sfxDrawStart();
     }
     return;
   }
