@@ -250,6 +250,7 @@ function triggerDeath() {
 
   if (lives <= 0) {
     gameOver = true;
+    score = 0;
     player.x = FIELD_LEFT;
     player.y = FIELD_TOP;
     window.dispatchEvent(new CustomEvent('game-over'));
@@ -282,6 +283,9 @@ function resetGame() {
   player.x = FIELD_LEFT;
   player.y = FIELD_TOP;
   resetFuse();
+  score = 0;
+  multiplierIndex = 0;
+  multiplierTimer = 0;
   initStyxEnemies(level, claimedCells);
   initWormEnemies(level, claimedCells);
 }
