@@ -3,7 +3,8 @@
  * Canvas setup, 60fps game loop, CGA palette constants,
  * player movement (issue #3), draw mode & Stix line rendering (issue #4),
  * flood-fill territory claiming & HUD (issue #5),
- * Styx field enemy (issue #11).
+ * Styx field enemy (issue #11),
+ * Worm border patrol enemy (issue #12).
  */
 
 // CGA palette constants — all colour references must use these
@@ -471,6 +472,9 @@ function render() {
   // Styx enemies
   renderStyxEnemies(ctx);
 
+  // Worm enemies
+  renderWormEnemies(ctx);
+
   // Player (on top)
   renderPlayer();
 
@@ -493,6 +497,7 @@ function gameLoop(timestamp) {
 
   if (!gameOver) {
     updateStyxEnemies(dt, claimedCells, currentLine, player, triggerDeath);
+    updateWormEnemies(dt, claimedCells, player, triggerDeath, level);
   }
 
   render();
@@ -502,5 +507,7 @@ function gameLoop(timestamp) {
 // Kick off the loop once the page is ready
 window.addEventListener('load', function () {
   initStyxEnemies(level, claimedCells);
+  initWormEnemies(level, claimedCells);
   requestAnimationFrame(gameLoop);
 });
+
