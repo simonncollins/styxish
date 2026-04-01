@@ -5,7 +5,8 @@
  * flood-fill territory claiming & HUD (issue #5),
  * Styx field enemy (issue #11),
  * Worm border patrol enemy (issue #12),
- * Fuse hesitation penalty (issue #13).
+ * Fuse hesitation penalty (issue #13),
+ * Collision detection & life system (issue #14).
  */
 
 // CGA palette constants — all colour references must use these
@@ -54,6 +55,12 @@ const TOTAL_PLAYFIELD_CELLS = (FIELD_W_CELLS - 2) * (FIELD_H_CELLS - 2);
 let lives = 3;
 let level = 1;
 let gameOver = false;
+
+/**
+ * Invulnerability timer (seconds remaining after a death).
+ * While > 0, triggerDeath() is a no-op — prevents double-kills.
+ */
+let invulnTimer = 0;
 
 // ---------------------------------------------------------------------------
 // Player state
@@ -167,24 +174,89 @@ function isOnSafeEdge(px, py) {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: find nearest border position to (px, py) using Euclidean distance.
+// Searches all 4 edges and returns the closest grid-snapped position.
+// ---------------------------------------------------------------------------
+function nearestBorderPosition(px, py) {
+  let bestDist = Infinity;
+  let bestX = FIELD_LEFT;
+  let bestY = FIELD_TOP;
+
+  function check(bx, by) {
+    const dx = px - bx;
+    const dy = py - by;
+    const d = dx * dx + dy * dy;
+    if (d < bestDist) {
+      bestDist = d;
+      bestX = bx;
+      bestY = by;
+    }
+  }
+
+  // Top edge
+  for (let x = FIELD_LEFT; x <= FIELD_RIGHT - CELL; x += CELL) check(x, FIELD_TOP);
+  // Bottom edge
+  for (let x = FIELD_LEFT; x <= FIELD_RIGHT - CELL; x += CELL) check(x, FIELD_BOTTOM - CELL);
+  // Left edge (skip corners already covered)
+  for (let y = FIELD_TOP + CELL; y <= FIELD_BOTTOM - CELL * 2; y += CELL) check(FIELD_LEFT, y);
+  // Right edge
+  for (let y = FIELD_TOP + CELL; y <= FIELD_BOTTOM - CELL * 2; y += CELL) check(FIELD_RIGHT - CELL, y);
+
+  return { x: bestX, y: bestY };
+}
+
+// ---------------------------------------------------------------------------
 // Death & reset
 // ---------------------------------------------------------------------------
 
 /**
- * Handle player death: lose a life, reset draw state, snap player to border.
+ * Handle player death: lose a life, reset draw state, snap player to nearest
+ * border position, start invulnerability window.
+ * No-op if invulnerability window is still active.
  */
 function triggerDeath() {
+  if (invulnTimer > 0) return;  // still invulnerable — ignore
+
   lives -= 1;
   currentLine = [];
   drawMode = false;
   playerMovedThisFrame = false;
   resetFuse();
-  player.x = FIELD_LEFT;
-  player.y = FIELD_TOP;
+
   if (lives <= 0) {
     gameOver = true;
+    player.x = FIELD_LEFT;
+    player.y = FIELD_TOP;
     window.dispatchEvent(new CustomEvent('game-over'));
+    return;
   }
+
+  // Respawn at nearest border position
+  const respawn = nearestBorderPosition(player.x, player.y);
+  player.x = respawn.x;
+  player.y = respawn.y;
+
+  // 1.5s invulnerability window
+  invulnTimer = 1.5;
+}
+
+// ---------------------------------------------------------------------------
+// Full game reset (called on play-again)
+// ---------------------------------------------------------------------------
+function resetGame() {
+  lives = 3;
+  level = 1;
+  gameOver = false;
+  invulnTimer = 0;
+  currentLine = [];
+  drawMode = false;
+  playerMovedThisFrame = false;
+  claimedCells.clear();
+  player.x = FIELD_LEFT;
+  player.y = FIELD_TOP;
+  resetFuse();
+  initStyxEnemies(level, claimedCells);
+  initWormEnemies(level, claimedCells);
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +373,12 @@ window.addEventListener('keydown', function (e) {
     e.preventDefault();
   }
 
+  // Play-again: R key resets game when game over
+  if (gameOver && e.code === 'KeyR') {
+    resetGame();
+    return;
+  }
+
   if (gameOver) return;
 
   // SPACEBAR activates draw mode
@@ -395,6 +473,13 @@ window.addEventListener('keyup', function (e) {
   }
 });
 
+// Play-again: click canvas when game over
+canvas.addEventListener('click', function () {
+  if (gameOver) {
+    resetGame();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
@@ -424,23 +509,38 @@ function renderCurrentLine() {
 }
 
 /**
- * Draw the player marker — magenta 8×8 square.
+ * Draw the player as a MAGENTA filled square.
  */
 function renderPlayer() {
+  // Flash the player during invulnerability window (toggle at ~8 Hz)
+  if (invulnTimer > 0) {
+    const flash = Math.floor(invulnTimer * 8) % 2 === 0;
+    if (!flash) return;
+  }
   ctx.fillStyle = CGA.MAGENTA;
   ctx.fillRect(player.x, player.y, CELL, CELL);
 }
 
 /**
- * Draw the territory percentage and lives HUD.
+ * Draw the territory percentage, level, and lives HUD.
+ * Lives are shown as small MAGENTA player-icon squares.
  */
 function renderHUD() {
   const percentage = ((claimedCells.size / TOTAL_PLAYFIELD_CELLS) * 100).toFixed(1);
   ctx.fillStyle = CGA.WHITE;
   ctx.font = 'bold 13px monospace';
   ctx.fillText(`Territory: ${percentage}%`, FIELD_LEFT + 4, FIELD_TOP - 2);
-  ctx.fillText(`Lives: ${lives}`, FIELD_RIGHT - 80, FIELD_TOP - 2);
   ctx.fillText(`Level: ${level}`, FIELD_LEFT + 160, FIELD_TOP - 2);
+
+  // Lives as MAGENTA block icons in the top-right
+  const iconSize = CELL;
+  const iconGap  = 2;
+  const baseX    = FIELD_RIGHT - (lives * (iconSize + iconGap));
+  const baseY    = BORDER_INSET - iconSize - 1;
+  ctx.fillStyle = CGA.MAGENTA;
+  for (let i = 0; i < lives; i++) {
+    ctx.fillRect(baseX + i * (iconSize + iconGap), baseY, iconSize, iconSize);
+  }
 }
 
 function renderGameOver() {
@@ -452,7 +552,7 @@ function renderGameOver() {
   ctx.fillText('GAME OVER', CANVAS_W / 2, CANVAS_H / 2);
   ctx.fillStyle = CGA.WHITE;
   ctx.font = 'bold 16px monospace';
-  ctx.fillText('Refresh to play again', CANVAS_W / 2, CANVAS_H / 2 + 36);
+  ctx.fillText('Press R or click to play again', CANVAS_W / 2, CANVAS_H / 2 + 36);
   ctx.textAlign = 'left';
 }
 
@@ -507,6 +607,11 @@ function gameLoop(timestamp) {
   lastTime = timestamp;
 
   if (!gameOver) {
+    // Tick down invulnerability timer
+    if (invulnTimer > 0) {
+      invulnTimer = Math.max(0, invulnTimer - dt);
+    }
+
     updateFuse(dt, drawMode, playerMovedThisFrame, currentLine, player, triggerDeath);
     updateStyxEnemies(dt, claimedCells, currentLine, player, triggerDeath);
     updateWormEnemies(dt, claimedCells, player, triggerDeath, level);
@@ -525,4 +630,3 @@ window.addEventListener('load', function () {
   initWormEnemies(level, claimedCells);
   requestAnimationFrame(gameLoop);
 });
-
