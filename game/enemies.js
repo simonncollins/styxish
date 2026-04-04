@@ -15,7 +15,7 @@
 /* ---- Constants (must match engine.js) ------------------------------------ */
 const ENEMY_CELL   = 8;
 const ENEMY_FIELD_LEFT   = 8;
-const ENEMY_FIELD_TOP    = 36;
+const ENEMY_FIELD_TOP    = 36;  // = BORDER_INSET + HUD_HEIGHT (matches engine.js)
 const ENEMY_FIELD_RIGHT  = 800 - 8;   // CANVAS_W - BORDER_INSET
 const ENEMY_FIELD_BOTTOM = 580 - 8;   // CANVAS_H - BORDER_INSET
 
@@ -91,22 +91,38 @@ function randomInteriorPos(claimedCells) {
 
 /* ---- Styx enemy object --------------------------------------------------- */
 
+// Styx line segment half-length in pixels (total span = 2 * STYX_ARM_LEN = ~56px)
+const STYX_ARM_LEN = 28;
+// Speed of the Styx mass in pixels/second (base, level 1)
+const STYX_BASE_SPEED = 80;
+// Number of line segments per Styx
+const STYX_NUM_LINES = 5;
+
 function createStyx(claimedCells) {
   const pos = randomInteriorPos(claimedCells);
-  const dir = randomDir();
+  const angle = Math.random() * Math.PI * 2;
+  const speed = STYX_BASE_SPEED;
+
+  // Velocity vector at the given angle
+  const vx = Math.cos(angle) * speed;
+  const vy = Math.sin(angle) * speed;
+
+  // Build N line segments, each with an independent angle and rotationRate
+  const lines = [];
+  for (let i = 0; i < STYX_NUM_LINES; i++) {
+    lines.push({
+      angle: (Math.random() * Math.PI * 2),
+      rotationRate: (0.8 + Math.random() * 1.2) * (Math.random() < 0.5 ? 1 : -1),
+    });
+  }
+
   return {
-    x: pos.x,
-    y: pos.y,
-    // sub-pixel accumulator for smooth movement
-    acc: 0,
-    dx: dir.dx,
-    dy: dir.dy,
-    // visual: 3–5 line segments per Styx
-    numSegments: 3 + Math.floor(Math.random() * 3),
-    // angle offset for animation
-    angle: Math.random() * Math.PI * 2,
-    colorIdx: Math.floor(Math.random() * STYX_COLORS.length),
-    colorTimer: 0,
+    // Central mass position (continuous, not grid-snapped)
+    cx: pos.x + ENEMY_CELL / 2,
+    cy: pos.y + ENEMY_CELL / 2,
+    vx,
+    vy,
+    lines,
   };
 }
 
@@ -122,40 +138,35 @@ function initStyxEnemies(level, claimedCells) {
 }
 
 /**
- * Move a single Styx one cell in its current direction.
- * If the destination is a claimed cell, outer border, or out of bounds,
- * pick a new random direction and try again (up to 4 tries).
+ * Apply a rotational impulse to each line segment when the mass bounces.
+ * @param {object} styx - Styx object
+ * @param {boolean} horizontal - true if bounced off left/right wall (vx flipped)
  */
-function moveStyxOneCell(styx, claimedCells) {
-  const dirs = [
-    { dx: styx.dx, dy: styx.dy },
-    ...([
-      { dx: ENEMY_CELL, dy: 0 }, { dx: -ENEMY_CELL, dy: 0 },
-      { dx: 0, dy: ENEMY_CELL }, { dx: 0, dy: -ENEMY_CELL },
-    ].filter(d => d.dx !== styx.dx || d.dy !== styx.dy)
-      .sort(() => Math.random() - 0.5)),
-  ];
-
-  for (const d of dirs) {
-    const nx = styx.x + d.dx;
-    const ny = styx.y + d.dy;
-    const inBounds =
-      nx >= ENEMY_FIELD_LEFT + ENEMY_CELL &&
-      nx <= ENEMY_FIELD_RIGHT - ENEMY_CELL * 2 &&
-      ny >= ENEMY_FIELD_TOP  + ENEMY_CELL &&
-      ny <= ENEMY_FIELD_BOTTOM - ENEMY_CELL * 2;
-    if (inBounds && !isClaimed(nx, ny, claimedCells) && !isOuterBorder(nx, ny)) {
-      styx.x  = nx;
-      styx.y  = ny;
-      styx.dx = d.dx;
-      styx.dy = d.dy;
-      return;
+function applyBounceImpulse(styx, horizontal) {
+  const delta = (0.3 + Math.random() * 0.5) * (Math.random() < 0.5 ? 1 : -1);
+  for (const line of styx.lines) {
+    // Add impulse to the rotation rate — creates the signature post-bounce swirl change
+    line.rotationRate += delta * (horizontal ? 1 : -1);
+    // Clamp to a reasonable range to avoid infinitely fast spinning
+    const maxRate = 4.0;
+    if (Math.abs(line.rotationRate) > maxRate) {
+      line.rotationRate = Math.sign(line.rotationRate) * maxRate;
     }
   }
-  // Completely boxed in — stay put and pick new random dir
-  const d = randomDir();
-  styx.dx = d.dx;
-  styx.dy = d.dy;
+}
+
+/**
+ * Line-segment intersection test.
+ * Returns true if segment AB intersects segment CD.
+ */
+function segmentsIntersect(ax, ay, bx, by, cx, cy, dx, dy) {
+  const d1x = bx - ax; const d1y = by - ay;
+  const d2x = dx - cx; const d2y = dy - cy;
+  const cross = d1x * d2y - d1y * d2x;
+  if (Math.abs(cross) < 1e-10) return false; // parallel
+  const t = ((cx - ax) * d2y - (cy - ay) * d2x) / cross;
+  const u = ((cx - ax) * d1y - (cy - ay) * d1x) / cross;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1;
 }
 
 /**
@@ -168,65 +179,95 @@ function moveStyxOneCell(styx, claimedCells) {
  * @param {function} onDeath     - Callback: called when Styx hits in-progress line
  */
 function updateStyxEnemies(dt, claimedCells, currentLine, player, onDeath, level = 1) {
+  // Interior bounds for the Styx mass centre (keep arm-length away from walls)
+  const margin = STYX_ARM_LEN + 4;
+  const minX = ENEMY_FIELD_LEFT   + margin;
+  const maxX = ENEMY_FIELD_RIGHT  - margin;
+  const minY = ENEMY_FIELD_TOP    + margin;
+  const maxY = ENEMY_FIELD_BOTTOM - margin;
+
+  const speedScale = Math.pow(STYX_SPEED_SCALE, level - 1);
+
   for (const styx of styxEnemies) {
-    // Advance animation angle
-    styx.angle += dt * 3.5;
-
-    // Color cycling
-    styx.colorTimer += dt;
-    if (styx.colorTimer > 0.12) {
-      styx.colorTimer = 0;
-      styx.colorIdx = (styx.colorIdx + 1) % STYX_COLORS.length;
+    // Advance each line's rotation
+    for (const line of styx.lines) {
+      line.angle += line.rotationRate * dt;
     }
 
-    // Movement (cell-based with sub-pixel accumulation for smooth pacing)
-    const styxSpeed = STYX_SPEED * Math.pow(STYX_SPEED_SCALE, level - 1);
-    styx.acc += styxSpeed * dt;
-    while (styx.acc >= ENEMY_CELL) {
-      styx.acc -= ENEMY_CELL;
-      moveStyxOneCell(styx, claimedCells);
+    // Move the central mass
+    styx.cx += styx.vx * speedScale * dt;
+    styx.cy += styx.vy * speedScale * dt;
+
+    // Bounce off left/right walls
+    if (styx.cx < minX) {
+      styx.cx = minX;
+      styx.vx = Math.abs(styx.vx);
+      applyBounceImpulse(styx, true);
+    } else if (styx.cx > maxX) {
+      styx.cx = maxX;
+      styx.vx = -Math.abs(styx.vx);
+      applyBounceImpulse(styx, true);
     }
 
-    // Collision: does Styx overlap any cell of the in-progress draw line?
-    if (currentLine.length > 0) {
-      const hit = currentLine.some(
-        p => Math.abs(p.x - styx.x) < ENEMY_CELL && Math.abs(p.y - styx.y) < ENEMY_CELL
-      );
-      if (hit) {
-        onDeath();
+    // Bounce off top/bottom walls
+    if (styx.cy < minY) {
+      styx.cy = minY;
+      styx.vy = Math.abs(styx.vy);
+      applyBounceImpulse(styx, false);
+    } else if (styx.cy > maxY) {
+      styx.cy = maxY;
+      styx.vy = -Math.abs(styx.vy);
+      applyBounceImpulse(styx, false);
+    }
+
+    // Collision: check each Styx arm against each segment of the draw line
+    if (currentLine.length >= 2) {
+      let hit = false;
+      for (const line of styx.lines) {
+        const ax = styx.cx + Math.cos(line.angle) * STYX_ARM_LEN;
+        const ay = styx.cy + Math.sin(line.angle) * STYX_ARM_LEN;
+        const bx = styx.cx - Math.cos(line.angle) * STYX_ARM_LEN;
+        const by = styx.cy - Math.sin(line.angle) * STYX_ARM_LEN;
+        for (let i = 0; i < currentLine.length - 1 && !hit; i++) {
+          const p = currentLine[i];
+          const q = currentLine[i + 1];
+          if (segmentsIntersect(ax, ay, bx, by, p.x, p.y, q.x, q.y)) {
+            hit = true;
+          }
+        }
+        if (hit) break;
       }
+      if (hit) onDeath();
     }
   }
 }
 
 /**
- * Render all Styx enemies as animated bundles of intersecting lines.
+ * Render all Styx enemies as animated multi-line swirl shapes.
  * @param {CanvasRenderingContext2D} ctx
  */
 function renderStyxEnemies(ctx) {
+  ctx.save();
+  ctx.lineWidth = 2;
   for (const styx of styxEnemies) {
-    const cx = styx.x + ENEMY_CELL / 2;
-    const cy = styx.y + ENEMY_CELL / 2;
-    const len = ENEMY_CELL * 1.2;
-
-    ctx.save();
-    ctx.lineWidth = 1.5;
-
-    for (let i = 0; i < styx.numSegments; i++) {
-      const theta = styx.angle + (i * Math.PI) / styx.numSegments;
-      const color = STYX_COLORS[(styx.colorIdx + i) % STYX_COLORS.length];
-      ctx.strokeStyle = color;
+    for (let i = 0; i < styx.lines.length; i++) {
+      const line = styx.lines[i];
+      // Alternate between CGA cyan and white for visual variety
+      ctx.strokeStyle = i % 2 === 0 ? '#00FFFF' : '#FFFFFF';
       ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(theta) * len,       cy + Math.sin(theta) * len);
-      ctx.lineTo(cx + Math.cos(theta + Math.PI) * len, cy + Math.sin(theta + Math.PI) * len);
+      ctx.moveTo(
+        styx.cx + Math.cos(line.angle) * STYX_ARM_LEN,
+        styx.cy + Math.sin(line.angle) * STYX_ARM_LEN,
+      );
+      ctx.lineTo(
+        styx.cx - Math.cos(line.angle) * STYX_ARM_LEN,
+        styx.cy - Math.sin(line.angle) * STYX_ARM_LEN,
+      );
       ctx.stroke();
     }
-
-    ctx.restore();
   }
+  ctx.restore();
 }
-
-
 // Base speed in pixels/second; increases with level
 const WORM_BASE_SPEED  = 64;
 const WORM_SPEED_DELTA = 16;  // additional px/s per level
