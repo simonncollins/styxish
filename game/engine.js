@@ -28,13 +28,14 @@ const CANVAS_H = canvas.height;  // 580
 
 // Playfield border inset (pixels from canvas edge)
 const BORDER_INSET = 8;
+const HUD_HEIGHT = 28;
 
 // Grid cell size — player positions are always multiples of CELL
 const CELL = 8;
 
 // Playfield grid boundaries (pixel coords)
 const FIELD_LEFT   = BORDER_INSET;
-const FIELD_TOP    = BORDER_INSET;
+const FIELD_TOP    = BORDER_INSET + HUD_HEIGHT;
 const FIELD_RIGHT  = CANVAS_W - BORDER_INSET;
 const FIELD_BOTTOM = CANVAS_H - BORDER_INSET;
 
@@ -618,16 +619,16 @@ function renderHUD() {
   const percentage = ((claimedCells.size / TOTAL_PLAYFIELD_CELLS) * 100).toFixed(1);
   ctx.fillStyle = CGA.WHITE;
   ctx.font = 'bold 13px monospace';
-  ctx.fillText(`Territory: ${percentage}%`, FIELD_LEFT + 4, FIELD_TOP - 2);
-  ctx.fillText(`Level: ${level}`, FIELD_LEFT + 160, FIELD_TOP - 2);
-  ctx.fillText(`Score: ${score}`, FIELD_LEFT + 260, FIELD_TOP - 2);
+  ctx.fillText(`Territory: ${percentage}%`, FIELD_LEFT + 4, BORDER_INSET + 20);
+  ctx.fillText(`Level: ${level}`, FIELD_LEFT + 160, BORDER_INSET + 20);
+  ctx.fillText(`Score: ${score}`, FIELD_LEFT + 260, BORDER_INSET + 20);
 
   // Cycling multiplier block -- left of the lives icons
   const multVal   = MULTIPLIER_VALUES[multiplierIndex];
   const multColor = MULTIPLIER_COLORS[multiplierIndex];
   const blockSize = CELL + 2;
   const multX = FIELD_RIGHT - (lives * (CELL + 2)) - blockSize - 16;
-  const multY = BORDER_INSET - blockSize;
+  const multY = BORDER_INSET + 4;
   ctx.fillStyle = multColor;
   ctx.fillRect(multX, multY, blockSize, blockSize);
   ctx.fillStyle = CGA.BLACK;
@@ -638,7 +639,7 @@ function renderHUD() {
   const iconSize = CELL;
   const iconGap  = 2;
   const baseX    = FIELD_RIGHT - (lives * (iconSize + iconGap));
-  const baseY    = BORDER_INSET - iconSize - 1;
+  const baseY    = BORDER_INSET + 4;
   ctx.fillStyle = CGA.MAGENTA;
   for (let i = 0; i < lives; i++) {
     ctx.fillRect(baseX + i * (iconSize + iconGap), baseY, iconSize, iconSize);

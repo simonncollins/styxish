@@ -15,7 +15,7 @@
 /* ---- Constants (must match engine.js) ------------------------------------ */
 const ENEMY_CELL   = 8;
 const ENEMY_FIELD_LEFT   = 8;
-const ENEMY_FIELD_TOP    = 8;
+const ENEMY_FIELD_TOP    = 36;
 const ENEMY_FIELD_RIGHT  = 800 - 8;   // CANVAS_W - BORDER_INSET
 const ENEMY_FIELD_BOTTOM = 580 - 8;   // CANVAS_H - BORDER_INSET
 
