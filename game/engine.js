@@ -608,7 +608,13 @@ function renderPlayer() {
     if (!flash) return;
   }
   ctx.fillStyle = CGA.MAGENTA;
-  ctx.fillRect(player.x, player.y, CELL, CELL);
+  // Draw a cross/plus shape at 2×CELL size, centred on the grid cell (closes #32)
+  const cx = player.x + CELL / 2;
+  const cy = player.y + CELL / 2;
+  const half = CELL;      // half-span = 8px → total span = 16px
+  const arm  = 3;         // arm thickness
+  ctx.fillRect(cx - half, cy - arm, half * 2, arm * 2); // horizontal bar
+  ctx.fillRect(cx - arm, cy - half, arm * 2, half * 2); // vertical bar
 }
 
 /**
